@@ -1,18 +1,12 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.UI;
-
 /*
- * CanvasGroupController.cs
+ * VFXAnimator.cs
  * 
  * Author: Aron Ireal Lewis Pence
  * License: Creative Commons Attribution 4.0 International (CC BY 4.0)
  * 
  * You are free to:
- * - Share — copy and redistribute the material in any medium or format.
- * - Adapt — remix, transform, and build upon the material for any purpose, even commercially.
+ * - Share â€” copy and redistribute the material in any medium or format.
+ * - Adapt â€” remix, transform, and build upon the material for any purpose, even commercially.
  * 
  * Attribution required. Full license: https://creativecommons.org/licenses/by/4.0/
  * 
@@ -21,6 +15,7 @@ using UnityEngine.UI;
  * It allows you to start with the UI hidden or visible, fade in/out smoothly,
  * and optionally perform a flicker effect after fading in.
  */
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
