@@ -75,9 +75,53 @@ public class TileFoundryCore_V3 : EditorWindow
     private void OnEnable()
     {
         GridController = new GridController(20, 20);
-        TileFoundryRightSidebar_V3.ForceRefresh(this);              // Load assets and populate sidebar
-        TileFoundryLeftSidebar_V3.RefreshLayoutPreviews();          // Load available saved layouts
+        EditorApplication.delayCall += () =>
+        {
+            EnsureResourceDirectoriesExist();
+            TileFoundryRightSidebar_V3.ForceRefresh(this);
+            TileFoundryLeftSidebar_V3.RefreshLayoutPreviews();
+        };
     }
+    private void EnsureResourceDirectoriesExist()
+    {
+        string[] requiredDirectories = new string[]
+        {
+        "Assets/Resources/GroundPalettes",
+        "Assets/Resources/WallPalettes",
+        "Assets/Resources/FurniturePalettes",
+        "Assets/Resources/ItemPalettes",
+        "Assets/Resources/OverlayPalettes",
+        "Assets/Resources/NodePalettes"
+        };
+
+        foreach (string fullPath in requiredDirectories)
+        {
+            CreateFolderRecursive(fullPath);
+        }
+
+        AssetDatabase.Refresh();
+    }
+
+    /// <summary>
+    /// Recursively creates folders if they don't exist.
+    /// </summary>
+    private void CreateFolderRecursive(string path)
+    {
+        if (AssetDatabase.IsValidFolder(path)) return;
+
+        string parent = System.IO.Path.GetDirectoryName(path).Replace("\\", "/");
+        string folderName = System.IO.Path.GetFileName(path);
+
+        if (!AssetDatabase.IsValidFolder(parent))
+        {
+            CreateFolderRecursive(parent); // Recursive call to ensure parent exists
+        }
+
+        AssetDatabase.CreateFolder(parent, folderName);
+        Debug.Log($"[TileFoundery] Created folder: {path}");
+    }
+
+
 
     /// <summary>
     /// Clean up native objects and caches when the window is closed.

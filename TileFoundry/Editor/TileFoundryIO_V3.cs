@@ -1,4 +1,5 @@
-using System.IO;
+ï»¿using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Tilemaps;
@@ -7,14 +8,22 @@ public static class TileFounderyIO_V3
 {
     private static readonly string layoutsRoot = "Assets/Resources/BuildingLayouts";
 
-    /// <summary>
-    /// Saves the building layout data as JSON and generates a preview thumbnail based on the actual tile asset images.
-    /// </summary>
+    // All of your palette roots
+    private static readonly string[] paletteRoots = new[]
+    {
+        "Assets/Resources/GroundPalettes",
+        "Assets/Resources/WallPalettes",
+        "Assets/Resources/FurniturePalettes",
+        "Assets/Resources/ItemPalettes",
+        "Assets/Resources/OverlayPalettes",
+        "Assets/Resources/NodePalettes"
+    };
+
     public static void SaveLayout(string layoutName, BuildingLayoutData data)
     {
         if (string.IsNullOrEmpty(layoutName))
         {
-            Debug.LogError("[TileFoundryIO] Layout name is empty.");
+            Debug.LogError("[TileFounderyIO] Layout name is empty.");
             return;
         }
 
@@ -25,192 +34,175 @@ public static class TileFounderyIO_V3
         string jsonPath = Path.Combine(folderPath, "layout.json");
         string previewPath = Path.Combine(folderPath, "preview.png");
 
-        // Serialize data to JSON
-        string json = JsonUtility.ToJson(data, true);
-        File.WriteAllText(jsonPath, json);
-
-        // Generate preview thumbnail using actual tile asset images.
+        File.WriteAllText(jsonPath, JsonUtility.ToJson(data, true));
         GeneratePreviewTexture(data, previewPath);
 
         AssetDatabase.Refresh();
-        Debug.Log($"[TileFoundryIO] Saved layout '{layoutName}' to {folderPath}");
+        Debug.Log($"[TileFounderyIO] Saved layout '{layoutName}' with preview at '{previewPath}'.");
     }
 
-    /// <summary>
-    /// Loads a layout from the specified JSON path.
-    /// </summary>
     public static BuildingLayoutData LoadLayout(string jsonPath)
     {
         if (string.IsNullOrEmpty(jsonPath) || !File.Exists(jsonPath))
         {
-            Debug.LogError($"[TileFoundryIO] Cannot load layout — file not found at: {jsonPath}");
+            Debug.LogError($"[TileFounderyIO] Cannot load layout. File not found: {jsonPath}");
             return null;
         }
-        string json = File.ReadAllText(jsonPath);
-        var data = JsonUtility.FromJson<BuildingLayoutData>(json);
-        return data;
+        return JsonUtility.FromJson<BuildingLayoutData>(File.ReadAllText(jsonPath));
     }
 
-    public static BuildingLayoutData LoadLayoutFromPath(string jsonPath)
-    {
-        // jsonPath should point to the layout.json file.
-        return LoadLayout(jsonPath);
-    }
-
-    /// <summary>
-    /// Searches for a TileBase asset in "Assets/Resources/TilePalettes" whose name matches the normalized key.
-    /// </summary>
-    private static TileBase FindTileAssetByName(string normalizedKey)
-    {
-        // Search for all TileBase assets under TilePalettes.
-        string[] guids = AssetDatabase.FindAssets("t:TileBase", new[] { "Assets/Resources/TilePalettes" });
-        foreach (string guid in guids)
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guid);
-            TileBase tile = AssetDatabase.LoadAssetAtPath<TileBase>(path);
-            if (tile != null)
-            {
-                string key = tile.name;
-                if (key == normalizedKey)
-                {
-                    return tile;
-                }
-            }
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Generates a composite preview texture (PNG) using each cell’s tile asset image.
-    /// </summary>
     private static void GeneratePreviewTexture(BuildingLayoutData data, string outputPath)
     {
-        int width = data.width;
-        int height = data.height;
+        int w = data.width, h = data.height;
         string[,] grid = data.ToGrid();
 
-        int cellPreviewSize = 32;
-        int compositeWidth = width * cellPreviewSize;
-        int compositeHeight = height * cellPreviewSize;
-        Texture2D composite = new Texture2D(compositeWidth, compositeHeight, TextureFormat.RGBA32, false);
+        const int cellSize = 32;
+        Texture2D composite = new Texture2D(w * cellSize, h * cellSize, TextureFormat.RGBA32, false);
 
-        // Get a reference to the open window to access the shared preview cache
-        TileFoundryCore_V3 core = EditorWindow.GetWindow<TileFoundryCore_V3>();
+        // Grab the preview cache from the open editor window
+        var core = EditorWindow.GetWindow<TileFoundryCore_V3>();
         var cache = core?.TilePreviewCache;
 
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < h; y++)
         {
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < w; x++)
             {
-                string assetName = grid[x, y];
+                string key = grid[x, y];
                 Texture2D cellTex = null;
 
-                if (!string.IsNullOrEmpty(assetName))
+                if (!string.IsNullOrEmpty(key))
                 {
-                    string key = assetName;
-                    TileBase tile = FindTileAssetByName(key);
-                    if (tile != null)
+                    // First check the cache
+                    if (cache != null && cache.TryGetValue(key, out var cachedTex))
                     {
-                        if (cache != null && cache.TryGetValue(key, out cellTex))
-                        {
-                            // Reuse cached texture
-                        }
-                        else
-                        {
-                            Sprite sprite = (tile as Tile)?.sprite;
-                            if (sprite != null)
-                            {
-                                cellTex = SpriteToTexture(sprite);
-                                if (cache != null && cellTex != null)
-                                {
-                                    cellTex.hideFlags = HideFlags.HideAndDontSave;
-                                    cache[key] = cellTex;
-                                }
-                            }
-                            else
-                            {
-                                Debug.LogWarning($"No sprite found for tile '{assetName}' at cell ({x},{y}). Using empty preview.");
-                            }
-                        }
+                        cellTex = cachedTex;
                     }
                     else
                     {
-                        Debug.LogWarning($"No asset found for '{assetName}' in TilePalettes at cell ({x},{y}).");
+                        // Try to find any matching asset
+                        var asset = FindAssetByName(key);
+                        if (asset != null)
+                        {
+                            cellTex = ExtractTexture(asset);
+                            if (cellTex != null && cache != null)
+                            {
+                                cellTex.hideFlags = HideFlags.HideAndDontSave;
+                                cache[key] = cellTex;
+                            }
+                        }
                     }
                 }
 
                 if (cellTex == null)
-                    cellTex = CreateEmptyPreview();
+                    cellTex = CreateEmptyPreview(cellSize);
 
-                Texture2D resized = ResizeTexture(cellTex, cellPreviewSize, cellPreviewSize);
-                Color[] cellPixels = resized.GetPixels();
+                // resize (nearestâ€neighbor)
+                var resized = ResizeTexture(cellTex, cellSize, cellSize);
+                var pixels = resized.GetPixels();
 
-                int destX = x * cellPreviewSize;
-                int destY = (height - 1 - y) * cellPreviewSize;
-                composite.SetPixels(destX, destY, cellPreviewSize, cellPreviewSize, cellPixels);
+                int px = x * cellSize, py = (h - 1 - y) * cellSize;
+                composite.SetPixels(px, py, cellSize, cellSize, pixels);
 
-                Object.DestroyImmediate(resized); // Explicitly destroy resized temp texture
+                Object.DestroyImmediate(resized);
             }
         }
 
         composite.Apply();
-        byte[] png = composite.EncodeToPNG();
-        File.WriteAllBytes(outputPath, png);
-        Object.DestroyImmediate(composite); // Clean up composite texture
+        File.WriteAllBytes(outputPath, composite.EncodeToPNG());
+        Object.DestroyImmediate(composite);
 
-        Debug.Log($"Preview texture saved to {outputPath}");
+        // tell the left sidebar to pick it up
         TileFoundryLeftSidebar_V3.RefreshLayoutPreviews();
     }
 
-
-    /// <summary>
-    /// Converts a sprite into a Texture2D.
-    /// </summary>
-    private static Texture2D SpriteToTexture(Sprite sprite)
+    private static Object FindAssetByName(string name)
     {
-        Texture2D texture = new Texture2D((int)sprite.rect.width, (int)sprite.rect.height, TextureFormat.RGBA32, false);
-        texture.SetPixels(sprite.texture.GetPixels((int)sprite.rect.x, (int)sprite.rect.y, (int)sprite.rect.width, (int)sprite.rect.height));
-        texture.Apply();
-        return texture;
-    }
-
-    /// <summary>
-    /// Resizes a texture to new dimensions using nearest-neighbor scaling.
-    /// </summary>
-    private static Texture2D ResizeTexture(Texture2D source, int newWidth, int newHeight)
-    {
-        Texture2D newTex = new Texture2D(newWidth, newHeight, source.format, false);
-        Color[] newPixels = new Color[newWidth * newHeight];
-        Color[] sourcePixels = source.GetPixels();
-        int sourceWidth = source.width;
-        int sourceHeight = source.height;
-        for (int y = 0; y < newHeight; y++)
+        // 1) TileBase
+        foreach (var root in paletteRoots)
         {
-            for (int x = 0; x < newWidth; x++)
+            var guids = AssetDatabase.FindAssets($"t:TileBase {name}", new[] { root });
+            foreach (var g in guids)
             {
-                float gx = (float)x / newWidth;
-                float gy = (float)y / newHeight;
-                int sx = Mathf.Clamp(Mathf.FloorToInt(gx * sourceWidth), 0, sourceWidth - 1);
-                int sy = Mathf.Clamp(Mathf.FloorToInt(gy * sourceHeight), 0, sourceHeight - 1);
-                newPixels[y * newWidth + x] = sourcePixels[sy * sourceWidth + sx];
+                var tile = AssetDatabase.LoadAssetAtPath<TileBase>(AssetDatabase.GUIDToAssetPath(g));
+                if (tile != null && tile.name == name) return tile;
             }
         }
-        newTex.SetPixels(newPixels);
-        newTex.Apply();
-        return newTex;
+
+        // 2) Sprite
+        foreach (var root in paletteRoots)
+        {
+            var guids = AssetDatabase.FindAssets($"t:Sprite {name}", new[] { root });
+            foreach (var g in guids)
+            {
+                var spr = AssetDatabase.LoadAssetAtPath<Sprite>(AssetDatabase.GUIDToAssetPath(g));
+                if (spr != null && spr.name == name) return spr;
+            }
+        }
+
+        // 3) Prefab w/ SpriteRenderer
+        foreach (var root in paletteRoots)
+        {
+            var guids = AssetDatabase.FindAssets($"t:Prefab {name}", new[] { root });
+            foreach (var g in guids)
+            {
+                var go = AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(g));
+                if (go != null && go.name == name && go.GetComponent<SpriteRenderer>() != null)
+                    return go;
+            }
+        }
+
+        return null;
     }
 
-    /// <summary>
-    /// Returns a default (empty) preview texture.
-    /// </summary>
-    private static Texture2D CreateEmptyPreview()
+    private static Texture2D ExtractTexture(Object asset)
     {
-        int size = 32;
-        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        Color[] pixels = new Color[size * size];
-        Color emptyColor = new Color(0.5f, 0.5f, 0.5f, 1f); // medium gray
-        for (int i = 0; i < pixels.Length; i++)
-            pixels[i] = emptyColor;
+        if (asset is TileBase tile && (tile as Tile)?.sprite != null)
+            return SpriteToTexture((tile as Tile).sprite);
+
+        if (asset is Sprite spr)
+            return SpriteToTexture(spr);
+
+        if (asset is GameObject go && go.GetComponent<SpriteRenderer>() is var sr && sr?.sprite != null)
+            return SpriteToTexture(sr.sprite);
+
+        return null;
+    }
+
+    private static Texture2D SpriteToTexture(Sprite s)
+    {
+        var tex = new Texture2D((int)s.rect.width, (int)s.rect.height, TextureFormat.RGBA32, false);
+        tex.SetPixels(s.texture.GetPixels(
+            (int)s.rect.x, (int)s.rect.y,
+            (int)s.rect.width, (int)s.rect.height));
+        tex.Apply();
+        return tex;
+    }
+
+    private static Texture2D ResizeTexture(Texture2D src, int w, int h)
+    {
+        var dst = new Texture2D(w, h, src.format, false);
+        var srcPixels = src.GetPixels();
+        int sw = src.width, sh = src.height;
+        var dstPixels = new Color[w * h];
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int sx = Mathf.Clamp((int)(x * (sw / (float)w)), 0, sw - 1);
+                int sy = Mathf.Clamp((int)(y * (sh / (float)h)), 0, sh - 1);
+                dstPixels[y * w + x] = srcPixels[sy * sw + sx];
+            }
+
+        dst.SetPixels(dstPixels);
+        dst.Apply();
+        return dst;
+    }
+
+    private static Texture2D CreateEmptyPreview(int size)
+    {
+        var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        var gray = new Color(0.5f, 0.5f, 0.5f, 1f);
+        var pixels = Enumerable.Repeat(gray, size * size).ToArray();
         tex.SetPixels(pixels);
         tex.Apply();
         return tex;

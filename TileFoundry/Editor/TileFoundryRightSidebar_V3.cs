@@ -141,7 +141,7 @@ public static class TileFoundryRightSidebar_V3
             "Assets/Resources/ItemPalettes",
             "Assets/Resources/NodePalettes",
             "Assets/Resources/OverlayPalettes",
-            "Assets/Resources/TilePalettes",
+            "Assets/Resources/GroundPalettes",
             "Assets/Resources/WallPalettes"
         };
 
@@ -219,13 +219,13 @@ public static class TileFoundryRightSidebar_V3
         // Determine the palette folder based on the selected layer.
         switch (core.SelectedLayer)
         {
-            case 0: palletFolder = "TilePalettes"; break;
+            case 0: palletFolder = "GroundPalettes"; break;
             case 1: palletFolder = "WallPalettes"; break;
             case 2: palletFolder = "FurniturePalettes"; break;
             case 3: palletFolder = "ItemPalettes"; break;
             case 4: palletFolder = "OverlayPalettes"; break;
             case 5: palletFolder = "NodePalettes"; break;
-            default: palletFolder = "TilePalettes"; break;
+            default: palletFolder = "GroundPalettes"; break;
         }
 
         string palletsRoot = $"Assets/Resources/{palletFolder}";
